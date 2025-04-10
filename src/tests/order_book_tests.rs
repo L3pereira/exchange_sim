@@ -1,3 +1,4 @@
+use rust_decimal_macros::dec;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::channel;
@@ -25,8 +26,8 @@ async fn test_order_book_add_limit_order() -> Result<()> {
         symbol,
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -35,7 +36,7 @@ async fn test_order_book_add_limit_order() -> Result<()> {
     order_book.process_order(limit_order.clone()).await?;
 
     // Verify the order was added (through best_bid inspection)
-    assert_eq!(order_book.best_bid(), Some(100.0));
+    assert_eq!(order_book.best_bid(), Some(dec!(100.0)));
 
     Ok(())
 }
@@ -56,8 +57,8 @@ async fn test_order_book_match_orders() -> Result<()> {
         symbol.clone(),
         Side::Sell,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -70,7 +71,7 @@ async fn test_order_book_match_orders() -> Result<()> {
         symbol,
         Side::Buy,
         OrderType::Market,
-        50, // Partially fill the resting order
+        dec!(50), // Partially fill the resting order
         None,
         None,
         TimeInForce::GTC,
@@ -92,17 +93,17 @@ async fn test_order_book_match_orders() -> Result<()> {
                         status, filled_qty, ..
                     } => {
                         received_order_update = true;
-                        if status == OrderStatus::PartiallyFilled && filled_qty == 50 {
+                        if status == OrderStatus::PartiallyFilled && filled_qty == dec!(50) {
                             // Resting order partially filled
                         }
-                        if status == OrderStatus::Filled && filled_qty == 50 {
+                        if status == OrderStatus::Filled && filled_qty == dec!(50) {
                             // Market order fully filled
                         }
                     }
                     ExchangeMessage::Trade(trade) => {
                         received_trade = true;
-                        assert_eq!(trade.quantity, 50);
-                        assert_eq!(trade.price, 100.0);
+                        assert_eq!(trade.quantity, dec!(50));
+                        assert_eq!(trade.price, dec!(100.0));
                     }
                     _ => {}
                 }
@@ -133,8 +134,8 @@ async fn test_order_book_cancel_order() -> Result<()> {
         symbol,
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -182,8 +183,8 @@ async fn test_order_book_time_in_force() -> Result<()> {
         symbol.clone(),
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(90.0), // Too low to match anything
+        dec!(100),
+        Some(dec!(90.0)), // Too low to match anything
         None,
         TimeInForce::IOC,
     );
@@ -210,8 +211,8 @@ async fn test_order_book_time_in_force() -> Result<()> {
         symbol.clone(),
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(90.0), // Too low to match anything
+        dec!(100),
+        Some(dec!(90.0)), // Too low to match anything
         None,
         TimeInForce::FOK,
     );
@@ -252,8 +253,8 @@ async fn test_order_book_stop_orders() -> Result<()> {
         symbol.clone(),
         Side::Sell,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -268,9 +269,9 @@ async fn test_order_book_stop_orders() -> Result<()> {
         symbol.clone(),
         Side::Buy,
         OrderType::StopLoss,
-        50,
+        dec!(50),
         None,
-        Some(101.0), // Stop price higher than current ask
+        Some(dec!(101.0)), // Stop price higher than current ask
         TimeInForce::GTC,
     );
 
@@ -282,8 +283,8 @@ async fn test_order_book_stop_orders() -> Result<()> {
         symbol.clone(),
         Side::Sell,
         OrderType::Limit,
-        100,
-        Some(98.0), // Lower price, will trigger stop
+        dec!(100),
+        Some(dec!(98.0)), // Lower price, will trigger stop
         None,
         TimeInForce::GTC,
     );

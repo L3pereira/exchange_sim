@@ -14,6 +14,8 @@ log = "0.4.27"
 env_logger = "0.11.8"
 dashmap = "6.1"  # Thread-safe concurrent hash map
 priority-queue = "2.3.1"  # For efficient price-time priority
+rust_decimal = { version = "1.37.1", features = ["serde"] }
+rust_decimal_macros = "1.37.1"
 
 [[test]]
 name = "integration_tests"

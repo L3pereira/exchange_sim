@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -55,10 +56,10 @@ pub struct Order {
     pub symbol: String,
     pub side: Side,
     pub order_type: OrderType,
-    pub quantity: u64,
-    pub filled_quantity: u64,
-    pub price: Option<f64>,      // Required for Limit and StopLimit orders
-    pub stop_price: Option<f64>, // Required for StopLoss and StopLimit orders
+    pub quantity: Decimal,
+    pub filled_quantity: Decimal,
+    pub price: Option<Decimal>, // Required for Limit and StopLimit orders
+    pub stop_price: Option<Decimal>, // Required for StopLoss and StopLimit orders
     pub time_in_force: TimeInForce,
     pub status: OrderStatus,
     pub created_at: DateTime<Utc>,
@@ -70,9 +71,9 @@ impl Order {
         symbol: String,
         side: Side,
         order_type: OrderType,
-        quantity: u64,
-        price: Option<f64>,
-        stop_price: Option<f64>,
+        quantity: Decimal,
+        price: Option<Decimal>,
+        stop_price: Option<Decimal>,
         time_in_force: TimeInForce,
     ) -> Self {
         let now = Utc::now();
@@ -83,7 +84,7 @@ impl Order {
             side,
             order_type,
             quantity,
-            filled_quantity: 0,
+            filled_quantity: Decimal::ZERO,
             price,
             stop_price,
             time_in_force,
@@ -104,7 +105,7 @@ impl Order {
     }
 
     /// Determine if an order is marketable against the best price
-    pub fn is_marketable(&self, best_price: Option<f64>) -> bool {
+    pub fn is_marketable(&self, best_price: Option<Decimal>) -> bool {
         match (self.side, self.order_type, self.price, best_price) {
             // Market orders are always marketable if there's a price
             (_, OrderType::Market, _, Some(_)) => true,
@@ -128,8 +129,8 @@ pub struct Trade {
     pub symbol: String,
     pub buy_order_id: Uuid,
     pub sell_order_id: Uuid,
-    pub price: f64,
-    pub quantity: u64,
+    pub price: Decimal,
+    pub quantity: Decimal,
     pub timestamp: DateTime<Utc>,
 }
 
@@ -138,8 +139,8 @@ impl Trade {
         symbol: String,
         buy_order_id: Uuid,
         sell_order_id: Uuid,
-        price: f64,
-        quantity: u64,
+        price: Decimal,
+        quantity: Decimal,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -166,7 +167,7 @@ pub enum ExchangeMessage {
     OrderUpdate {
         order_id: Uuid,
         status: OrderStatus,
-        filled_qty: u64,
+        filled_qty: Decimal,
         symbol: String,
     },
 

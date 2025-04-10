@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use env_logger::Env;
 use log::{debug, info};
+use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Once;
@@ -110,8 +111,8 @@ async fn test_complete_trading_scenario() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Sell,
         OrderType::Limit,
-        100,
-        Some(10000.0),
+        dec!(100),
+        Some(dec!(10000.0)),
         None,
         TimeInForce::GTC,
     );
@@ -120,8 +121,8 @@ async fn test_complete_trading_scenario() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Sell,
         OrderType::Limit,
-        200,
-        Some(10100.0),
+        dec!(200),
+        Some(dec!(10100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -131,8 +132,8 @@ async fn test_complete_trading_scenario() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        150,
-        Some(9900.0),
+        dec!(150),
+        Some(dec!(9900.0)),
         None,
         TimeInForce::GTC,
     );
@@ -141,8 +142,8 @@ async fn test_complete_trading_scenario() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        250,
-        Some(9800.0),
+        dec!(250),
+        Some(dec!(9800.0)),
         None,
         TimeInForce::GTC,
     );
@@ -161,7 +162,7 @@ async fn test_complete_trading_scenario() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Market,
-        50,
+        dec!(50),
         None,
         None,
         TimeInForce::IOC,
@@ -184,7 +185,7 @@ async fn test_complete_trading_scenario() -> Result<()> {
 
     // Should have one trade
     assert_eq!(trades.len(), 1);
-    assert_eq!(trades[0].quantity, 50);
+    assert_eq!(trades[0].quantity, dec!(50));
     assert_eq!(trades[0].buy_order_id, market_id);
     assert_eq!(trades[0].sell_order_id, sell_id_1);
 
@@ -198,8 +199,8 @@ async fn test_complete_trading_scenario() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Sell,
         OrderType::Limit,
-        300,
-        Some(10200.0),
+        dec!(300),
+        Some(dec!(10200.0)),
         None,
         TimeInForce::GTD(Utc::now() + Duration::seconds(5)),
     );
@@ -239,8 +240,8 @@ async fn test_complete_trading_scenario() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        1000, // Larger than available quantity at this price
-        Some(10000.0),
+        dec!(1000), // Larger than available quantity at this price
+        Some(dec!(10000.0)),
         None,
         TimeInForce::FOK,
     );
@@ -310,8 +311,8 @@ async fn test_multiple_matching_algorithms() -> Result<()> {
             symbol.clone(),
             Side::Sell,
             OrderType::Limit,
-            100,
-            Some(100.0),
+            dec!(100),
+            Some(dec!(100.0)),
             None,
             TimeInForce::GTC,
         );
@@ -323,8 +324,8 @@ async fn test_multiple_matching_algorithms() -> Result<()> {
             symbol.clone(),
             Side::Buy,
             OrderType::Limit,
-            100,
-            Some(90.0),
+            dec!(100),
+            Some(dec!(90.0)),
             None,
             TimeInForce::GTC,
         );
@@ -341,7 +342,7 @@ async fn test_multiple_matching_algorithms() -> Result<()> {
             symbol.clone(),
             Side::Buy,
             OrderType::Market,
-            50,
+            dec!(50),
             None,
             None,
             TimeInForce::GTC,
@@ -404,8 +405,8 @@ async fn test_error_handling() -> Result<()> {
         "INVALID/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -419,7 +420,7 @@ async fn test_error_handling() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        100,
+        dec!(100),
         None, // Missing price
         None,
         TimeInForce::GTC,

@@ -1,6 +1,7 @@
 use chrono::Utc;
 use log::{debug, error, info, trace, warn};
 use priority_queue::PriorityQueue;
+use rust_decimal::Decimal;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,11 +15,11 @@ use crate::time::ExchangeClock;
 
 /// Priority wrapper for buy orders (higher price first, then older orders)
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct BuyPriority(i64, Reverse<u64>); // (price_key, Reverse(sequence))
+struct BuyPriority(Decimal, Reverse<u64>); // (price, Reverse(sequence))
 
 /// Priority wrapper for sell orders (lower price first, then older orders)
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct SellPriority(Reverse<i64>, Reverse<u64>); // (Reverse(price_key), Reverse(sequence))
+struct SellPriority(Reverse<Decimal>, Reverse<u64>); // (Reverse(price), Reverse(sequence))
 
 /// Limit order book with price-time priority using priority queue
 pub struct OrderBook {
@@ -34,11 +35,11 @@ pub struct OrderBook {
     orders: HashMap<Uuid, Order>,
 
     // Map order ID to its side and price
-    order_info: HashMap<Uuid, (Side, i64)>,
+    order_info: HashMap<Uuid, (Side, Decimal)>,
 
     // For tracking total quantity at each price level
-    bid_quantities: HashMap<i64, u64>,
-    ask_quantities: HashMap<i64, u64>,
+    bid_quantities: HashMap<Decimal, Decimal>,
+    ask_quantities: HashMap<Decimal, Decimal>,
 
     // Next sequence number for time priority
     next_sequence: u64,
@@ -76,69 +77,47 @@ impl OrderBook {
         }
     }
 
-    // Convert float price to integer for precision-safe comparison
-    fn price_to_key(price: f64) -> i64 {
-        (price * 10000.0) as i64
-    }
-
-    // Convert integer key back to float price
-    fn key_to_price(key: i64) -> f64 {
-        key as f64 / 10000.0
-    }
-
     // Get the best bid price
-    pub fn best_bid(&self) -> Option<f64> {
-        self.bids
-            .peek()
-            .map(|(_, priority)| Self::key_to_price(priority.0))
+    pub fn best_bid(&self) -> Option<Decimal> {
+        self.bids.peek().map(|(_, priority)| priority.0)
     }
 
     // Get the best ask price
-    pub fn best_ask(&self) -> Option<f64> {
+    pub fn best_ask(&self) -> Option<Decimal> {
         self.asks.peek().map(|(_, priority)| {
             // Extract the price from SellPriority(Reverse(price), _)
-            let SellPriority(Reverse(price_key), _) = priority;
-            Self::key_to_price(*price_key)
+            let SellPriority(Reverse(price), _) = priority;
+            *price
         })
     }
 
     // Get total quantity available at a price level
-    fn get_quantity_at_price(&self, side: Side, price_key: i64) -> u64 {
+    fn get_quantity_at_price(&self, side: Side, price: Decimal) -> Decimal {
         match side {
-            Side::Buy => *self.bid_quantities.get(&price_key).unwrap_or(&0),
-            Side::Sell => *self.ask_quantities.get(&price_key).unwrap_or(&0),
+            Side::Buy => *self.bid_quantities.get(&price).unwrap_or(&Decimal::ZERO),
+            Side::Sell => *self.ask_quantities.get(&price).unwrap_or(&Decimal::ZERO),
         }
     }
 
     // Update the quantity for a price level
-    fn update_quantity_at_price(&mut self, side: Side, price_key: i64, quantity: u64) {
+    fn update_quantity_at_price(&mut self, side: Side, price: Decimal, quantity: Decimal) {
         match side {
             Side::Buy => {
-                if quantity > 0 {
-                    self.bid_quantities.insert(price_key, quantity);
+                if quantity > Decimal::ZERO {
+                    self.bid_quantities.insert(price, quantity);
                 } else {
-                    self.bid_quantities.remove(&price_key);
+                    self.bid_quantities.remove(&price);
                 }
             }
             Side::Sell => {
-                if quantity > 0 {
-                    self.ask_quantities.insert(price_key, quantity);
+                if quantity > Decimal::ZERO {
+                    self.ask_quantities.insert(price, quantity);
                 } else {
-                    self.ask_quantities.remove(&price_key);
+                    self.ask_quantities.remove(&price);
                 }
             }
         }
     }
-
-    // Helper to get priority info for an order
-    // fn get_order_priority_seq(&self, side: Side, order_id: &Uuid) -> Option<u64> {
-    //     match side {
-    //         Side::Buy => self.bids.get_priority(order_id)
-    //             .map(|BuyPriority(_, Reverse(seq))| *seq),
-    //         Side::Sell => self.asks.get_priority(order_id)
-    //             .map(|SellPriority(_, Reverse(seq))| *seq),
-    //     }
-    // }
 
     // Helper to pop the best order by side
     fn pop_best_order(&mut self, side: Side) -> Option<Uuid> {
@@ -148,8 +127,8 @@ impl OrderBook {
         }
     }
 
-    // Helper to simplify quantity calculation
-    fn get_available_quantity(&self, side: Side) -> u64 {
+    // Helper to calculate total available quantity for a side
+    fn get_available_quantity(&self, side: Side) -> Decimal {
         match side {
             Side::Buy => self.ask_quantities.values().sum(),
             Side::Sell => self.bid_quantities.values().sum(),
@@ -176,8 +155,6 @@ impl OrderBook {
             }
         };
 
-        let price_key = Self::price_to_key(price);
-
         // Update order status and timestamps
         order.status = OrderStatus::New;
         order.updated_at = Utc::now();
@@ -190,28 +167,26 @@ impl OrderBook {
         match order.side {
             Side::Buy => {
                 self.bids
-                    .push(order.id, BuyPriority(price_key, Reverse(sequence)));
+                    .push(order.id, BuyPriority(price, Reverse(sequence)));
 
                 // Update quantity tracking
-                let current_qty = self.get_quantity_at_price(Side::Buy, price_key);
+                let current_qty = self.get_quantity_at_price(Side::Buy, price);
                 let new_qty = current_qty + (order.quantity - order.filled_quantity);
-                self.update_quantity_at_price(Side::Buy, price_key, new_qty);
+                self.update_quantity_at_price(Side::Buy, price, new_qty);
             }
             Side::Sell => {
-                self.asks.push(
-                    order.id,
-                    SellPriority(Reverse(price_key), Reverse(sequence)),
-                );
+                self.asks
+                    .push(order.id, SellPriority(Reverse(price), Reverse(sequence)));
 
                 // Update quantity tracking
-                let current_qty = self.get_quantity_at_price(Side::Sell, price_key);
+                let current_qty = self.get_quantity_at_price(Side::Sell, price);
                 let new_qty = current_qty + (order.quantity - order.filled_quantity);
-                self.update_quantity_at_price(Side::Sell, price_key, new_qty);
+                self.update_quantity_at_price(Side::Sell, price, new_qty);
             }
         }
 
         // Store order in lookups
-        self.order_info.insert(order.id, (order.side, price_key));
+        self.order_info.insert(order.id, (order.side, price));
         self.orders.insert(order.id, order.clone());
 
         debug!(
@@ -226,11 +201,8 @@ impl OrderBook {
     fn remove_order(&mut self, order_id: Uuid) -> Result<Option<Order>> {
         trace!("Attempting to remove order: id={}", order_id);
 
-        if let Some((side, price_key)) = self.order_info.remove(&order_id) {
-            trace!(
-                "Found order in map: side={:?}, price_key={}",
-                side, price_key
-            );
+        if let Some((side, price)) = self.order_info.remove(&order_id) {
+            trace!("Found order in map: side={:?}, price={}", side, price);
 
             // Remove from appropriate priority queue - just get the ID
             let removed = match side {
@@ -242,9 +214,9 @@ impl OrderBook {
                 // Update quantity tracking for the price level
                 if let Some(order) = self.orders.get(&order_id) {
                     let order_qty = order.quantity - order.filled_quantity;
-                    let current_qty = self.get_quantity_at_price(side, price_key);
-                    let new_qty = current_qty.saturating_sub(order_qty);
-                    self.update_quantity_at_price(side, price_key, new_qty);
+                    let current_qty = self.get_quantity_at_price(side, price);
+                    let new_qty = current_qty - order_qty;
+                    self.update_quantity_at_price(side, price, new_qty);
                 }
 
                 // Get the order from storage
@@ -313,7 +285,7 @@ impl OrderBook {
                         .send(ExchangeMessage::OrderUpdate {
                             order_id: order.id,
                             status: OrderStatus::Rejected,
-                            filled_qty: 0,
+                            filled_qty: Decimal::ZERO,
                             symbol: self.symbol.clone(),
                         })
                         .await
@@ -331,7 +303,7 @@ impl OrderBook {
         let mut matched_orders: Vec<(Uuid, bool)> = Vec::new(); // (id, order, fully_filled)
 
         // Keep matching until we've filled the order or no more liquidity
-        while remaining_qty > 0 {
+        while remaining_qty > Decimal::ZERO {
             // Get the next best order from the opposite side using our helper
             if let Some(order_id) = self.pop_best_order(order.side) {
                 if let Some(resting_order) = self.orders.get(&order_id).cloned() {
@@ -370,10 +342,10 @@ impl OrderBook {
                     updated_resting.filled_quantity = resting_order.quantity - resting_remaining;
 
                     // Update quantity tracking for the price level
-                    let price_key = Self::price_to_key(resting_order.price.unwrap_or(trade.price));
-                    let current_qty = self.get_quantity_at_price(resting_order.side, price_key);
+                    let price = resting_order.price.unwrap_or(trade.price);
+                    let current_qty = self.get_quantity_at_price(resting_order.side, price);
                     let new_qty = current_qty - trade.quantity;
-                    self.update_quantity_at_price(resting_order.side, price_key, new_qty);
+                    self.update_quantity_at_price(resting_order.side, price, new_qty);
 
                     // Send trade notification
                     if let Err(e) = self.router_tx.send(ExchangeMessage::Trade(trade)).await {
@@ -451,7 +423,7 @@ impl OrderBook {
         for (order_id, fully_filled) in matched_orders {
             if !fully_filled {
                 // Get the original sequence number and price
-                if let Some((side, price_key)) = self.order_info.get(&order_id) {
+                if let Some((side, price)) = self.order_info.get(&order_id) {
                     // Get a new sequence number - we can't reliably retrieve the original
                     let seq = self.next_sequence;
                     self.next_sequence += 1;
@@ -459,12 +431,11 @@ impl OrderBook {
                     // Reinsert the order with the new sequence
                     match *side {
                         Side::Buy => {
-                            self.bids
-                                .push(order_id, BuyPriority(*price_key, Reverse(seq)));
+                            self.bids.push(order_id, BuyPriority(*price, Reverse(seq)));
                         }
                         Side::Sell => {
                             self.asks
-                                .push(order_id, SellPriority(Reverse(*price_key), Reverse(seq)));
+                                .push(order_id, SellPriority(Reverse(*price), Reverse(seq)));
                         }
                     }
                 }
@@ -481,7 +452,7 @@ impl OrderBook {
 
             // IOC - partial fills allowed, cancel rest
             (filled_qty, qty, TimeInForce::IOC) if filled_qty < qty => {
-                if filled_qty > 0 {
+                if filled_qty > Decimal::ZERO {
                     trace!(
                         "IOC order partially filled: {} of {}, canceling remainder",
                         filled_qty, qty
@@ -542,7 +513,7 @@ impl OrderBook {
         let is_marketable = match order.side {
             Side::Buy => {
                 if let Some(best_ask) = self.best_ask() {
-                    let marketable = order.price.unwrap_or(0.0) >= best_ask;
+                    let marketable = order.price.unwrap_or(Decimal::ZERO) >= best_ask;
                     trace!(
                         "Buy limit order marketability check: order price={:?}, best ask={}, marketable={}",
                         order.price, best_ask, marketable
@@ -555,7 +526,7 @@ impl OrderBook {
             }
             Side::Sell => {
                 if let Some(best_bid) = self.best_bid() {
-                    let marketable = order.price.unwrap_or(f64::MAX) <= best_bid;
+                    let marketable = order.price.unwrap_or(Decimal::MAX) <= best_bid;
                     trace!(
                         "Sell limit order marketability check: order price={:?}, best bid={}, marketable={}",
                         order.price, best_bid, marketable
@@ -585,7 +556,7 @@ impl OrderBook {
 
                 // For IOC orders, cancel any remaining quantity
                 if matches!(order.time_in_force, TimeInForce::IOC) {
-                    order.status = if order.filled_quantity > 0 {
+                    order.status = if order.filled_quantity > Decimal::ZERO {
                         trace!("IOC order partially filled - canceling remainder");
                         OrderStatus::PartiallyFilled
                     } else {
@@ -629,7 +600,7 @@ impl OrderBook {
                         .send(ExchangeMessage::OrderUpdate {
                             order_id: order.id,
                             status: OrderStatus::Canceled,
-                            filled_qty: 0,
+                            filled_qty: Decimal::ZERO,
                             symbol: self.symbol.clone(),
                         })
                         .await
@@ -647,7 +618,7 @@ impl OrderBook {
                         .send(ExchangeMessage::OrderUpdate {
                             order_id: order.id,
                             status: OrderStatus::Rejected,
-                            filled_qty: 0,
+                            filled_qty: Decimal::ZERO,
                             symbol: self.symbol.clone(),
                         })
                         .await
@@ -763,7 +734,7 @@ impl OrderBook {
                 .send(ExchangeMessage::OrderUpdate {
                     order_id: order.id,
                     status: OrderStatus::New,
-                    filled_qty: 0,
+                    filled_qty: Decimal::ZERO,
                     symbol: self.symbol.clone(),
                 })
                 .await
@@ -786,7 +757,7 @@ impl OrderBook {
         );
 
         // Validate order
-        if order.quantity == 0 {
+        if order.quantity == Decimal::ZERO {
             error!("Order quantity is zero: id={}", order.id);
             return Err(ExchangeError::InvalidOrder(
                 "Order quantity must be greater than 0".to_string(),
@@ -923,7 +894,7 @@ impl OrderBook {
                         .send(ExchangeMessage::OrderUpdate {
                             order_id,
                             status: OrderStatus::Rejected,
-                            filled_qty: 0,
+                            filled_qty: Decimal::ZERO,
                             symbol,
                         })
                         .await

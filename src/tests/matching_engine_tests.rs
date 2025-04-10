@@ -1,4 +1,6 @@
 use chrono::Utc;
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec; // For convenient Decimal literals
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -11,8 +13,8 @@ fn create_test_orders() -> (Order, Order) {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -21,8 +23,8 @@ fn create_test_orders() -> (Order, Order) {
         "TEST/USD".to_string(),
         Side::Sell,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -50,7 +52,7 @@ fn test_price_time_matching_can_match() -> Result<()> {
 
     // Non-matching price - should not match
     let mut higher_price_sell = sell_order.clone();
-    higher_price_sell.price = Some(101.0);
+    higher_price_sell.price = Some(dec!(101.0));
     assert!(!engine.can_match(&buy_order, &higher_price_sell));
 
     // Market order - should always match with limit order
@@ -72,32 +74,32 @@ fn test_price_time_matching_match_orders() -> Result<()> {
     let (trade, buy_remaining, sell_remaining) = result;
 
     // Both orders should be fully matched
-    assert_eq!(buy_remaining, 0);
-    assert_eq!(sell_remaining, 0);
-    assert_eq!(trade.quantity, 100);
-    assert_eq!(trade.price, 100.0);
+    assert_eq!(buy_remaining, Decimal::ZERO);
+    assert_eq!(sell_remaining, Decimal::ZERO);
+    assert_eq!(trade.quantity, dec!(100));
+    assert_eq!(trade.price, dec!(100.0));
     assert_eq!(trade.buy_order_id, buy_order.id);
     assert_eq!(trade.sell_order_id, sell_order.id);
 
     // Partial match - buy order larger
     let mut large_buy = buy_order.clone();
-    large_buy.quantity = 200;
+    large_buy.quantity = dec!(200);
     let result = engine.match_orders(&large_buy, &sell_order)?;
     let (trade, buy_remaining, sell_remaining) = result;
 
-    assert_eq!(buy_remaining, 100); // 200 - 100 = 100 remaining
-    assert_eq!(sell_remaining, 0); // Fully matched
-    assert_eq!(trade.quantity, 100);
+    assert_eq!(buy_remaining, dec!(100)); // 200 - 100 = 100 remaining
+    assert_eq!(sell_remaining, Decimal::ZERO); // Fully matched
+    assert_eq!(trade.quantity, dec!(100));
 
     // Partial match - sell order larger
     let mut large_sell = sell_order.clone();
-    large_sell.quantity = 150;
+    large_sell.quantity = dec!(150);
     let result = engine.match_orders(&buy_order, &large_sell)?;
     let (trade, buy_remaining, sell_remaining) = result;
 
-    assert_eq!(buy_remaining, 0); // Fully matched
-    assert_eq!(sell_remaining, 50); // 150 - 100 = 50 remaining
-    assert_eq!(trade.quantity, 100);
+    assert_eq!(buy_remaining, Decimal::ZERO); // Fully matched
+    assert_eq!(sell_remaining, dec!(50)); // 150 - 100 = 50 remaining
+    assert_eq!(trade.quantity, dec!(100));
 
     Ok(())
 }
@@ -111,8 +113,8 @@ fn test_price_time_price_determination() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::GTC,
     );
@@ -122,29 +124,29 @@ fn test_price_time_price_determination() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Sell,
         OrderType::Limit,
-        100,
-        Some(99.0), // Lower price
+        dec!(100),
+        Some(dec!(99.0)), // Lower price
         None,
         TimeInForce::GTC,
     );
 
     // Earlier order sets the price
     let result = engine.match_orders(&early_buy, &sell_order)?;
-    assert_eq!(result.0.price, 100.0); // Buy price as it was resting
+    assert_eq!(result.0.price, dec!(100.0)); // Buy price as it was resting
 
     // Market order with limit order
     let market_buy = Order::new(
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Market,
-        100,
+        dec!(100),
         None,
         None,
         TimeInForce::GTC,
     );
 
     let result = engine.match_orders(&market_buy, &sell_order)?;
-    assert_eq!(result.0.price, 99.0); // Sell limit price used for market buy
+    assert_eq!(result.0.price, dec!(99.0)); // Sell limit price used for market buy
 
     Ok(())
 }
@@ -161,12 +163,12 @@ fn test_pro_rata_matching() -> Result<()> {
     let (trade, buy_remaining, sell_remaining) = result;
 
     // Both orders should be fully matched
-    assert_eq!(buy_remaining, 0);
-    assert_eq!(sell_remaining, 0);
-    assert_eq!(trade.quantity, 100);
+    assert_eq!(buy_remaining, Decimal::ZERO);
+    assert_eq!(sell_remaining, Decimal::ZERO);
+    assert_eq!(trade.quantity, dec!(100));
 
     // Last price should be updated
-    assert_eq!(engine.last_price(&buy_order.symbol), Some(100.0));
+    assert_eq!(engine.last_price(&buy_order.symbol), Some(dec!(100.0)));
 
     Ok(())
 }
@@ -180,16 +182,16 @@ fn test_time_in_force_validation() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::FOK,
     );
 
-    assert!(engine.validate_time_in_force(&fok_order, 100).is_ok());
+    assert!(engine.validate_time_in_force(&fok_order, dec!(100)).is_ok());
 
     // FOK - partial fill should be rejected
-    let result = engine.validate_time_in_force(&fok_order, 50);
+    let result = engine.validate_time_in_force(&fok_order, dec!(50));
     assert!(result.is_err());
 
     // IOC - partial fill is fine
@@ -197,13 +199,13 @@ fn test_time_in_force_validation() -> Result<()> {
         "TEST/USD".to_string(),
         Side::Buy,
         OrderType::Limit,
-        100,
-        Some(100.0),
+        dec!(100),
+        Some(dec!(100.0)),
         None,
         TimeInForce::IOC,
     );
 
-    assert!(engine.validate_time_in_force(&ioc_order, 50).is_ok());
+    assert!(engine.validate_time_in_force(&ioc_order, dec!(50)).is_ok());
 
     Ok(())
 }

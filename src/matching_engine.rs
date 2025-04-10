@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 
 use crate::error::{ExchangeError, Result};
@@ -9,16 +10,20 @@ pub trait MatchingAlgorithm {
     fn can_match(&self, buy_order: &Order, sell_order: &Order) -> bool;
 
     /// Match two orders and return the resulting trade and remaining quantities
-    fn match_orders(&mut self, buy_order: &Order, sell_order: &Order) -> Result<(Trade, u64, u64)>;
+    fn match_orders(
+        &mut self,
+        buy_order: &Order,
+        sell_order: &Order,
+    ) -> Result<(Trade, Decimal, Decimal)>;
 
     /// Get the last traded price for a symbol
-    fn last_price(&self, symbol: &str) -> Option<f64>;
+    fn last_price(&self, symbol: &str) -> Option<Decimal>;
 
     /// Update the last traded price for a symbol
-    fn update_last_price(&mut self, symbol: &str, price: f64);
+    fn update_last_price(&mut self, symbol: &str, price: Decimal);
 
     /// Validate if an order can be filled according to time-in-force rules
-    fn validate_time_in_force(&self, order: &Order, fill_qty: u64) -> Result<bool>;
+    fn validate_time_in_force(&self, order: &Order, fill_qty: Decimal) -> Result<bool>;
 
     /// Get the name of the algorithm
     fn name(&self) -> &str;
@@ -27,7 +32,7 @@ pub trait MatchingAlgorithm {
 /// Standard price-time priority matching engine
 pub struct PriceTimeMatchingEngine {
     /// Last trade price per symbol
-    last_prices: HashMap<String, f64>,
+    last_prices: HashMap<String, Decimal>,
 }
 
 impl PriceTimeMatchingEngine {
@@ -44,12 +49,12 @@ impl MatchingAlgorithm for PriceTimeMatchingEngine {
     }
 
     /// Get the last trade price for a symbol
-    fn last_price(&self, symbol: &str) -> Option<f64> {
+    fn last_price(&self, symbol: &str) -> Option<Decimal> {
         self.last_prices.get(symbol).copied()
     }
 
     /// Update the last trade price for a symbol
-    fn update_last_price(&mut self, symbol: &str, price: f64) {
+    fn update_last_price(&mut self, symbol: &str, price: Decimal) {
         self.last_prices.insert(symbol.to_string(), price);
     }
 
@@ -77,7 +82,11 @@ impl MatchingAlgorithm for PriceTimeMatchingEngine {
 
     /// Match two orders and generate trades
     /// Returns the trade and remaining quantities for both orders
-    fn match_orders(&mut self, buy_order: &Order, sell_order: &Order) -> Result<(Trade, u64, u64)> {
+    fn match_orders(
+        &mut self,
+        buy_order: &Order,
+        sell_order: &Order,
+    ) -> Result<(Trade, Decimal, Decimal)> {
         if !self.can_match(buy_order, sell_order) {
             return Err(ExchangeError::InternalError(
                 "Orders cannot match".to_string(),
@@ -87,9 +96,9 @@ impl MatchingAlgorithm for PriceTimeMatchingEngine {
         // Calculate match quantity
         let buy_remaining = buy_order.quantity - buy_order.filled_quantity;
         let sell_remaining = sell_order.quantity - sell_order.filled_quantity;
-        let match_qty = std::cmp::min(buy_remaining, sell_remaining);
+        let match_qty = buy_remaining.min(sell_remaining);
 
-        if match_qty == 0 {
+        if match_qty == Decimal::ZERO {
             return Err(ExchangeError::InternalError(
                 "No quantity to match".to_string(),
             ));
@@ -115,7 +124,7 @@ impl MatchingAlgorithm for PriceTimeMatchingEngine {
             // Both are market orders, use last price or midpoint
             (None, None) => {
                 // In a real system, we would use more sophisticated price discovery
-                self.last_price(&buy_order.symbol).unwrap_or(0.0)
+                self.last_price(&buy_order.symbol).unwrap_or(Decimal::ZERO)
             }
         };
 
@@ -139,7 +148,7 @@ impl MatchingAlgorithm for PriceTimeMatchingEngine {
     }
 
     /// Validate if an order can be filled according to time-in-force rules
-    fn validate_time_in_force(&self, order: &Order, fill_qty: u64) -> Result<bool> {
+    fn validate_time_in_force(&self, order: &Order, fill_qty: Decimal) -> Result<bool> {
         match order.time_in_force {
             // Fill or Kill - must be fully filled or not at all
             TimeInForce::FOK => {
@@ -166,7 +175,7 @@ impl MatchingAlgorithm for PriceTimeMatchingEngine {
 /// Pro-rata matching engine implementation
 pub struct ProRataMatchingEngine {
     /// Last trade price per symbol
-    last_prices: HashMap<String, f64>,
+    last_prices: HashMap<String, Decimal>,
 }
 
 impl ProRataMatchingEngine {
@@ -182,11 +191,11 @@ impl MatchingAlgorithm for ProRataMatchingEngine {
         "Pro-Rata"
     }
 
-    fn last_price(&self, symbol: &str) -> Option<f64> {
+    fn last_price(&self, symbol: &str) -> Option<Decimal> {
         self.last_prices.get(symbol).copied()
     }
 
-    fn update_last_price(&mut self, symbol: &str, price: f64) {
+    fn update_last_price(&mut self, symbol: &str, price: Decimal) {
         self.last_prices.insert(symbol.to_string(), price);
     }
 
@@ -206,7 +215,11 @@ impl MatchingAlgorithm for ProRataMatchingEngine {
         }
     }
 
-    fn match_orders(&mut self, buy_order: &Order, sell_order: &Order) -> Result<(Trade, u64, u64)> {
+    fn match_orders(
+        &mut self,
+        buy_order: &Order,
+        sell_order: &Order,
+    ) -> Result<(Trade, Decimal, Decimal)> {
         // For single order matching, pro-rata behaves like price-time
         // The difference would be seen when matching against multiple orders
 
@@ -218,9 +231,9 @@ impl MatchingAlgorithm for ProRataMatchingEngine {
 
         let buy_remaining = buy_order.quantity - buy_order.filled_quantity;
         let sell_remaining = sell_order.quantity - sell_order.filled_quantity;
-        let match_qty = std::cmp::min(buy_remaining, sell_remaining);
+        let match_qty = buy_remaining.min(sell_remaining);
 
-        if match_qty == 0 {
+        if match_qty == Decimal::ZERO {
             return Err(ExchangeError::InternalError(
                 "No quantity to match".to_string(),
             ));
@@ -237,7 +250,7 @@ impl MatchingAlgorithm for ProRataMatchingEngine {
             }
             (None, Some(sell_price)) => sell_price,
             (Some(buy_price), None) => buy_price,
-            (None, None) => self.last_price(&buy_order.symbol).unwrap_or(0.0),
+            (None, None) => self.last_price(&buy_order.symbol).unwrap_or(Decimal::ZERO),
         };
 
         let trade = Trade::new(
@@ -257,7 +270,7 @@ impl MatchingAlgorithm for ProRataMatchingEngine {
         Ok((trade, buy_remaining_after, sell_remaining_after))
     }
 
-    fn validate_time_in_force(&self, order: &Order, fill_qty: u64) -> Result<bool> {
+    fn validate_time_in_force(&self, order: &Order, fill_qty: Decimal) -> Result<bool> {
         // Same TIF rules apply regardless of matching algorithm
         match order.time_in_force {
             TimeInForce::FOK => {
